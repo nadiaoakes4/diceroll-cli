@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diceroll"
+version = "0.1.0"
+description = "A small library and CLI for parsing and rolling dice notation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "nadiaoakes4"}]
+
+[project.scripts]
+diceroll = "diceroll.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["diceroll*"]
