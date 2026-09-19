@@ -88,6 +88,12 @@ $ generate_expressions.sh | diceroll > results.txt
 Blank lines and lines starting with `#` are skipped. Pass `--seed` to make
 a run reproducible.
 
+## Running tests
+
+```
+$ python -m unittest discover
+```
+
 ## Status
 
 Early skeleton. The parser and CLI work for the notation listed above;
