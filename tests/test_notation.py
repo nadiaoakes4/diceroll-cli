@@ -104,6 +104,29 @@ class ParseKeepDropTests(unittest.TestCase):
         self.assertEqual(expr.terms, [DiceTerm(3, 6, 1, "kh", 3)])
 
 
+class ParseExplodeRerollTests(unittest.TestCase):
+    def test_explode_flag(self) -> None:
+        expr = parse("1d6!")
+        self.assertEqual(expr.terms, [DiceTerm(1, 6, 1, explode=True)])
+
+    def test_reroll_below(self) -> None:
+        expr = parse("1d20r2")
+        self.assertEqual(expr.terms, [DiceTerm(1, 20, 1, reroll_below=2)])
+
+    def test_explode_and_reroll_combined(self) -> None:
+        expr = parse("1d6!r1")
+        self.assertEqual(
+            expr.terms, [DiceTerm(1, 6, 1, explode=True, reroll_below=1)]
+        )
+
+    def test_explode_reroll_and_keep_combined(self) -> None:
+        expr = parse("4d6!r1kh3")
+        self.assertEqual(
+            expr.terms,
+            [DiceTerm(4, 6, 1, "kh", 3, explode=True, reroll_below=1)],
+        )
+
+
 class ParseErrorTests(unittest.TestCase):
     def test_empty_string(self) -> None:
         with self.assertRaisesRegex(NotationError, "empty expression"):
@@ -153,6 +176,24 @@ class ParseErrorTests(unittest.TestCase):
         ):
             parse("x")
 
+    def test_missing_reroll_threshold(self) -> None:
+        with self.assertRaisesRegex(
+            NotationError, "missing reroll threshold at position 3"
+        ):
+            parse("1d6r")
+
+    def test_reroll_threshold_zero(self) -> None:
+        with self.assertRaisesRegex(
+            NotationError, "reroll threshold out of range"
+        ):
+            parse("1d6r0")
+
+    def test_reroll_threshold_too_large(self) -> None:
+        with self.assertRaisesRegex(
+            NotationError, "reroll threshold out of range"
+        ):
+            parse("1d6r6")
+
 
 class RollTests(unittest.TestCase):
     def test_plain_dice_term_sums_all_rolls(self) -> None:
@@ -201,6 +242,47 @@ class RollTests(unittest.TestCase):
     def test_str_includes_kept_values(self) -> None:
         result = roll(parse("2d6"), FakeRng([1, 2]))
         self.assertEqual(str(result), "3 (2d6=[1, 2])")
+
+
+class RollExplodeTests(unittest.TestCase):
+    def test_explode_adds_rerolled_max_values(self) -> None:
+        result = roll(parse("1d6!"), FakeRng([6, 6, 3]))
+        self.assertEqual(result.total, 15)
+        self.assertEqual(result.rolls, [("1d6!", [15])])
+
+    def test_no_explosion_on_non_max_roll(self) -> None:
+        result = roll(parse("1d6!"), FakeRng([4]))
+        self.assertEqual(result.total, 4)
+        self.assertEqual(result.rolls, [("1d6!", [4])])
+
+    def test_explosion_capped_to_avoid_infinite_loop(self) -> None:
+        result = roll(parse("1d1!"), FakeRng([1] * 102))
+        self.assertEqual(result.total, 101)
+
+    def test_explode_interacts_with_keep_highest(self) -> None:
+        result = roll(parse("2d6!kh1"), FakeRng([6, 6, 3, 4]))
+        self.assertEqual(result.total, 15)
+        self.assertEqual(result.rolls, [("2d6!kh1", [15])])
+
+
+class RollRerollTests(unittest.TestCase):
+    def test_reroll_below_replaces_low_value(self) -> None:
+        result = roll(parse("1d20r2"), FakeRng([1, 15]))
+        self.assertEqual(result.total, 15)
+        self.assertEqual(result.rolls, [("1d20r2", [15])])
+
+    def test_reroll_only_happens_once(self) -> None:
+        result = roll(parse("1d20r2"), FakeRng([1, 2]))
+        self.assertEqual(result.total, 2)
+
+    def test_no_reroll_above_threshold(self) -> None:
+        result = roll(parse("1d20r2"), FakeRng([10]))
+        self.assertEqual(result.total, 10)
+
+    def test_reroll_then_explode(self) -> None:
+        result = roll(parse("1d6!r1"), FakeRng([1, 6, 6, 3]))
+        self.assertEqual(result.total, 15)
+        self.assertEqual(result.rolls, [("1d6!r1", [15])])
 
 
 class RollTextTests(unittest.TestCase):

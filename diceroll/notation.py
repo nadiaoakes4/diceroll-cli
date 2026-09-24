@@ -4,17 +4,23 @@ Grammar, roughly:
 
     expr    := term (('+' | '-') term)*
     term    := dice | integer
-    dice    := [count] 'd' sides [keepdrop]
+    dice    := [count] 'd' sides ['!'] ['r' threshold] [keepdrop]
     keepdrop:= ('kh' | 'kl' | 'dh' | 'dl') count
 
 Examples: "d20", "3d6+2", "4d6dl1" (drop the lowest of four d6),
-"2d20kh1" (keep the highest of two d20, i.e. roll with advantage).
+"2d20kh1" (keep the highest of two d20, i.e. roll with advantage),
+"1d6!" (exploding: reroll and add on a max result), "1d20r2" (reroll
+once if the die shows 2 or below).
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+
+# Safety valve against an infinite explosion chain (e.g. "1d1!" always
+# rolls max). No real dice pool needs more than this many extra rolls.
+_MAX_EXPLOSIONS = 100
 
 
 class NotationError(ValueError):
@@ -28,6 +34,8 @@ class DiceTerm:
     sign: int  # +1 or -1
     keep: str | None = None  # one of "kh", "kl", "dh", "dl"
     keep_count: int = 0
+    explode: bool = False
+    reroll_below: int = 0  # reroll once, if nonzero, a die showing <= this
 
 
 @dataclass
@@ -102,6 +110,26 @@ def parse(text: str) -> Expression:
             if sides < 1:
                 raise NotationError("die size must be at least 1")
 
+            explode = False
+            if peek() == "!":
+                explode = True
+                pos += 1
+
+            reroll_below = 0
+            if peek().lower() == "r":
+                pos += 1
+                rb_start = pos
+                while pos < length and text[pos].isdigit():
+                    pos += 1
+                rb_text = text[rb_start:pos]
+                if not rb_text:
+                    raise NotationError(
+                        f"missing reroll threshold at position {pos}"
+                    )
+                reroll_below = int(rb_text)
+                if reroll_below < 1 or reroll_below >= sides:
+                    raise NotationError("reroll threshold out of range")
+
             keep = None
             keep_count = 0
             lookahead = text[pos:pos + 2].lower()
@@ -116,7 +144,9 @@ def parse(text: str) -> Expression:
                 if keep_count < 1 or keep_count > count:
                     raise NotationError("keep/drop count out of range")
 
-            terms.append(DiceTerm(count, sides, sign, keep, keep_count))
+            terms.append(
+                DiceTerm(count, sides, sign, keep, keep_count, explode, reroll_below)
+            )
         else:
             if not number_text:
                 raise NotationError(f"unexpected character {ch!r} at position {pos}")
@@ -142,6 +172,20 @@ class RollResult:
         return f"{self.total} ({', '.join(parts)})"
 
 
+def _roll_die(rng: random.Random, sides: int, explode: bool, reroll_below: int) -> int:
+    value = rng.randint(1, sides)
+    if reroll_below and value <= reroll_below:
+        value = rng.randint(1, sides)
+
+    total = value
+    explosions = 0
+    while explode and value == sides and explosions < _MAX_EXPLOSIONS:
+        value = rng.randint(1, sides)
+        total += value
+        explosions += 1
+    return total
+
+
 def roll(expression: Expression, rng: random.Random | None = None) -> RollResult:
     """Evaluate an already-parsed Expression, rolling dice with rng."""
     rng = rng if rng is not None else random.Random()
@@ -153,7 +197,10 @@ def roll(expression: Expression, rng: random.Random | None = None) -> RollResult
             total += term.sign * term.value
             continue
 
-        raw = [rng.randint(1, term.sides) for _ in range(term.count)]
+        raw = [
+            _roll_die(rng, term.sides, term.explode, term.reroll_below)
+            for _ in range(term.count)
+        ]
         if term.keep == "kh":
             kept = sorted(raw, reverse=True)[: term.keep_count]
         elif term.keep == "kl":
@@ -168,6 +215,10 @@ def roll(expression: Expression, rng: random.Random | None = None) -> RollResult
         total += term.sign * sum(kept)
 
         label = f"{term.count}d{term.sides}"
+        if term.explode:
+            label += "!"
+        if term.reroll_below:
+            label += f"r{term.reroll_below}"
         if term.keep:
             label += f"{term.keep}{term.keep_count}"
         detail.append((label, kept))

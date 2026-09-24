@@ -21,6 +21,9 @@ d20            one twenty-sided die
 2d20kl1        roll two d20, keep the lowest (disadvantage)
 4d6dl1         roll four d6, drop the lowest (common ability-score roll)
 1d8+1d4+2      multiple dice terms and a modifier combined
+1d6!           exploding: on a max roll, roll again and add, repeating
+1d20r2         reroll once if the die shows 2 or below
+4d6!r1kh3      the above can combine: explode, reroll, then keep/drop
 ```
 
 ## Library usage
